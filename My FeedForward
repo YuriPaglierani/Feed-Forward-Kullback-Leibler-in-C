@@ -1,0 +1,303 @@
+#include<stdio.h>
+#include<math.h>
+#include<stdlib.h>
+#include<malloc.h>
+#include<time.h>
+#define EPS 0.0001													/*Epsilon for gradient descend*/
+#define ERR 0.01													/*Control error for the end of algorithm*/
+#define AMP 10														/*double of amplitude of random numbers generated*/
+#define CONT 500000													/*N max of cycles in the NN*/
+#define CORR 0.00001												/*Needed to correct an implementation problem in the Kullback-Leibler distance*/
+int r,c,neur;
+int rand(void);
+void CONTROLMATR(float **matr){										/*Check the allocation of matrix*/
+	if (matr==NULL){
+		perror("Errore durante l'allocazione della matrice");
+		exit(1);
+	}
+}
+void CONTROLVEC(float *vec){										/*Check the allocation of the vector*/
+	if (vec==NULL){
+		perror("Errore durante l'allocazione del vettore");
+		exit(1);
+	}
+}
+void NEXANDIN(int *l,int *m,int *n){							/*Examples,inputs, and number of Hidden layers*/
+	int count=0,col,row,neurons;
+	while(1){
+		printf("Quanti input ha la rete neurale?\n");
+		scanf("%d", &row);
+		printf("Quanti esempi servono a ogni input (Non contando il valore di soglia)?\n");
+		scanf("%d", &col);
+		printf("Quanti neuroni in input vuoi usare?\n");
+		scanf("%d",&neurons);
+		*l=row;
+		*m=col+1;	
+		*n=neurons;												/*the col+1 is because there is the threshold*/
+		if(*l>=1 && *m>1 && *n>=1){								/*check the values from the user*/
+			break;
+		}
+		count++;
+		if (count>10){											
+			perror("Errore, hai fatto troppi tentativi");
+			break;
+		}
+		printf("I valori inseriti non sono corretti provare con altri\n");
+	}
+}
+void INPUT(float **matrix,int *l,int *m){										/*Dfile reading*/
+	int i,j;
+	FILE * XFILE;
+	XFILE=fopen("xvec.txt","r");
+	for (i=0;i<*l;i++){
+		for(j=0;j<*m;j++){
+			if (j!=*m-1){
+				fscanf(XFILE,"%f",&matrix[i][j]);
+			}
+			else{
+				matrix[i][j]=1;													/*input of the threshold*/
+			}
+		}
+	}
+	fclose(XFILE);
+}
+void INPUTEPS(float *eps,int *row){												/*correct outputs*/
+	int i;
+	FILE * EPSFILE;
+	EPSFILE=fopen("epssol.txt","r");
+	for (i=0;i<*row;i++){
+		fscanf(EPSFILE,"%f",&eps[i]);
+	}
+	fclose(EPSFILE);
+}
+float SCALPRODVEC(float **xmat, float *wvec, int *col, int ind){					/*scalar product between matrix and vector*/
+	int i;
+	float scalprodf=0;
+	for (i=0;i<*col;i++){
+		scalprodf+=xmat[ind][i]*wvec[i];
+	}
+	return scalprodf;
+}
+float SCALPRODMATR(float **xmat, float **wvec, int *col, int ind1, int ind2){				
+	int i;
+	float scalprodf=0;
+	for (i=0;i<*col;i++){
+		scalprodf+=xmat[ind1][i]*wvec[i][ind2];
+	}
+	return scalprodf;
+}
+float ERRORF(float *Sol,float *yvec,int *row){									/*Evaluate my error function*/
+	float err=0;
+	int i;
+	for (i=0;i<*row;i++){
+		err+=((1.0-Sol[i])*log((1.0-Sol[i]+CORR)/(1.0-yvec[i]+CORR))+(1.0+Sol[i])*log((1.0+Sol[i]+CORR)/(1.0+yvec[i]+CORR)))/log(2.0);	/*Use of Dkl*/
+	}
+	err=err/2;
+	printf("%f\n",err);
+	return err;
+}
+void NEWHEBB(float **xmat,float **neurmat,float **Wi,float *Wneuri, float *Sol,float *yvec,int *col,int *neur,int ind){		/*Hebb's rule*/
+	int i,j;
+	float *deltaneur,**deltainput;
+	deltainput=(float**)malloc(sizeof(float*)*(*col));
+	for(i=0; i<*col; i++){
+        deltainput[i]=(float*)malloc(sizeof(float)*(*neur));
+	}
+	CONTROLMATR(deltainput);
+	deltaneur=(float*)malloc(sizeof(float)*(*neur));
+	CONTROLVEC(deltaneur);
+	for(i=0;i<*col;i++){															/*gradient descend way to update weight vector*/
+		for(j=0;j<*neur;j++){
+			deltainput[i][j]=(EPS/log(2.0))*(Sol[ind]-yvec[ind])*Wneuri[j]*(1-neurmat[ind][j]*neurmat[ind][j])*xmat[ind][i];
+		}
+	}
+	for(i=0;i<*neur;i++){
+		deltaneur[i]=(EPS/log(2.0))*(Sol[ind]-yvec[ind])*neurmat[ind][i];
+	}
+	for (i=0;i<*col;i++){
+		for(j=0;j<*neur;j++){
+			Wi[i][j]=Wi[i][j]+deltainput[i][j];
+		}
+	} 
+	for(i=0;i<*neur;i++){
+		Wneuri[i]=Wneuri[i]+deltaneur[i];
+	}
+	free(deltaneur);
+	free(deltainput);
+}
+void FEEDFORWARD(float **mat,float *Sol,int *row,int *col,int *neurinput){
+	float **weight,**neurmat,*yvec,Er,*weightneurinput;
+	int ind,i,j,count=0;
+	FILE * errorfile;												/*file cost function and weight vector*/
+	FILE * WEIGHTFILE;												/*File weight of inputs on hidden neurons*/
+	FILE * WEIGHTNEURINPUTFILE;										/*File weight of hidden neurons on ending neurons*/
+	FILE * DIMPARAMETERS;											/*File number of inputd. examples and hidden neurons*/
+	WEIGHTFILE=fopen("FilePesi.txt","w");
+	errorfile=fopen("Errori.dat","w");
+	WEIGHTNEURINPUTFILE=fopen("FilePesiNeuroniInput.txt","w");
+	DIMPARAMETERS=fopen("Dimensioneparametri.txt","w");
+	if (errorfile==NULL || WEIGHTFILE==NULL || WEIGHTNEURINPUTFILE==NULL || DIMPARAMETERS==NULL){
+		perror("Errore di apertura del file");
+		exit(1);
+	}
+	weight=(float**)malloc(sizeof(float*)*(*col));
+	for(i=0;i<*col; i++){
+        weight[i]=(float*)malloc(sizeof(float)*(*neurinput));
+	}	
+	CONTROLMATR(weight);
+	neurmat=(float**)malloc(sizeof(float*)*(*row));
+	for(i=0;i<*row;i++){
+        neurmat[i]=(float*)malloc(sizeof(float)*(*neurinput));
+	}	
+	CONTROLMATR(neurmat);														
+	yvec=(float*)malloc(sizeof(float)*(*row));
+	CONTROLVEC(yvec);
+	srand((unsigned int)time(NULL));							
+	for(i=0;i<*col;i++){
+		for(j=0;j<*neurinput;j++){									
+			weight[i][j]=((float)rand()/(float)(RAND_MAX))*(AMP+1)-(AMP/2);
+		}
+	}
+	weightneurinput=(float*)malloc(sizeof(float)*(*neurinput));
+	for(j=0;j<*neurinput;j++){									
+		weightneurinput[j]=((float)rand()/(float)(RAND_MAX))*(AMP+1)-(AMP/2);
+	}
+	CONTROLVEC(weightneurinput);
+	while(1){
+		count++;                 
+		for (i=0;i<*row;i++){
+			for(j=0;j<*neurinput;j++){
+				neurmat[i][j]=tanh(SCALPRODMATR(mat,weight,col,i,j));
+			}
+		} 
+		for (i=0;i<*row;i++){
+			yvec[i]=tanh(SCALPRODVEC(neurmat,weightneurinput,neurinput,i));				/*Output proposed by the program*/
+		} 
+		ind=(rand()%(*row));															/*random index to avoid gutter functions*/
+		Er=ERRORF(Sol,yvec,row);
+		if(count%10==1){
+			fprintf(errorfile,"%d %f\n",count,Er);
+		}
+		NEWHEBB(mat,neurmat,weight,weightneurinput,Sol,yvec,col,neurinput,ind);							/*Hebb's rule*/
+		if (Er<ERR || count>=CONT){																	/*Stop*/
+			if (count>=CONT){
+				perror("Non hai ancora ragguinto l'Epsilon desiderato");
+			}
+			break;       
+		}
+	}
+	fprintf(DIMPARAMETERS,"%d %d %d\n",*row,*col,*neurinput);								
+	for(i=0;i<*neurinput;i++){
+		for(j=0;j<*col;j++){
+			fprintf(WEIGHTFILE,"%f ",weight[j][i]);
+		}
+		fprintf(WEIGHTFILE,"\n");
+	}
+	for(i=0;i<*neurinput;i++){
+		fprintf(WEIGHTNEURINPUTFILE,"%f ",weightneurinput[i]);
+	}
+	fclose(errorfile);																
+	free(weight);
+	free(neurmat);
+	free(weightneurinput);
+	free(yvec);
+	fclose(WEIGHTFILE);
+	fclose(DIMPARAMETERS);
+	fclose(WEIGHTNEURINPUTFILE);
+}
+void LAUNCHSOL(int *col,int *neur){									
+	int i,j;
+	float **wvec,*wneurvec,*neurvec,*myXvec,sol=0;
+	FILE * WEIGHTFILE;
+	FILE * WEIGHTNEURINPUTFILE;
+	WEIGHTFILE=fopen("FilePesi.txt","r");
+	WEIGHTNEURINPUTFILE=fopen("FilePesiNeuroniInput.txt","r");
+	myXvec=(float*)malloc(*col*sizeof(float));
+	CONTROLVEC(myXvec);
+	wneurvec=(float*)malloc(*neur*sizeof(float));
+	CONTROLVEC(wneurvec);
+	neurvec=(float*)malloc(*neur*sizeof(float));
+	CONTROLVEC(neurvec);
+	wvec=(float**)malloc(*col*sizeof(float*));
+	for(i=0;i<*col;i++){
+		wvec[i]=(float*)malloc(*neur*sizeof(float));
+	}
+	CONTROLMATR(wvec);
+	for (j=0;j<*neur;j++){
+		for(i=0;i<*col;i++){
+			fscanf(WEIGHTFILE,"%f",&wvec[i][j]);
+		}
+	}
+	for(j=0;j<*neur;j++){
+		fscanf(WEIGHTNEURINPUTFILE,"%f",&wneurvec[j]);
+	}
+	printf("Inserisci il tuo input: ");
+	for(i=0;i<*col;i++){
+		if(i<*col-1){
+			scanf("%f",&myXvec[i]);
+		}
+		else{
+			myXvec[i]=1;
+		}
+	}
+	for(j=0;j<*neur;j++){
+		neurvec[j]=0;
+		for(i=0;i<*col;i++){
+			neurvec[j]+=myXvec[i]*wvec[i][j];
+		}
+		neurvec[j]=tanh(neurvec[j]);
+		sol+=neurvec[j]*wneurvec[j];
+	}
+	sol=tanh(sol);
+	printf("La soluzione e': %f",sol);
+	fclose(WEIGHTFILE);
+	free(wvec);
+	fclose(WEIGHTNEURINPUTFILE);
+	free(wneurvec);
+	free(myXvec);
+	free(neurvec);
+}
+int main(){
+	float **matrix,*sol,SCALPRODVEC(float**,float*,int*,int),SCALPRODMATR(float**,float**,int*,int,int),ERRORF(float*,float*,int*);
+	int *l,*m,*n,i,answ;
+	void INPUT(float**,int*,int*),NEXANDIN(int*,int*,int*),LAUNCHSOL(int*,int*),INPUTEPS(float*,int*),FEEDFORWARD(float**,float*,int*,int*,int*),NEWHEBB(float**,float**,float**,float*,float*,float*,int*,int*,int),CONTROLVEC(float*),CONTROLMATR(float**);
+	FILE * DIMPARAMETERS;
+	DIMPARAMETERS=fopen("Dimensioneparametri.txt","r");
+	l=&r;
+	m=&c;
+	n=&neur;
+	fscanf(DIMPARAMETERS,"%d %d %d",&r,&c,&neur);
+	if (DIMPARAMETERS!=NULL && (*l!=0 && *m!=0 && *n!=0)){
+		while(1){
+			printf("I vecchi dati prevedono %d input con %d esempi ciascuno e %d neuroni intermedi, vuoi cambiarli? (1=Si, 0=No): ",r,c,neur);
+			scanf("%d",&answ);
+			if (answ==1){
+				NEXANDIN(l,m,n);
+				break;
+			}
+			if (answ==0){
+				break;
+			}
+			else{
+				printf("Riprova\n");
+			}
+		}
+	}
+	else{
+		NEXANDIN(l,m,n);
+	}
+	fclose(DIMPARAMETERS);														
+    matrix=(float **)malloc(sizeof(float*)*(*l));			
+    for(i=0; i<*l; i++){
+        matrix[i]=(float*)malloc(sizeof(float)*(*m));
+	}
+	CONTROLMATR(matrix);
+	sol=(float *)malloc(sizeof(float)*(*l));
+	CONTROLVEC(sol);
+	INPUTEPS(sol,l);										/*correct answers*/	
+	INPUT(matrix,l,m);										/*initial inputs*/
+	FEEDFORWARD(matrix,sol,l,m,n);							/*Feed Forward algorithm*/
+	LAUNCHSOL(m,n);
+	free(sol);												/*Dealloc*/
+	free(matrix);
+	return 0;
